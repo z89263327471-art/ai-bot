@@ -25,21 +25,17 @@ COMPANIES = {
 
 USER_CHAT_ID = None
 
-# --- загрузка chat_id
-try:
-    with open("chat_id.txt", "r") as f:
-        USER_CHAT_ID = int(f.read())
-except:
-    USER_CHAT_ID = None
 
-
-# --- данные рынка
+# --- MARKET DATA ---
 def get_stock_data(ticker):
-    stock = yf.Ticker(ticker)
-    return stock.history(period="6mo", interval="1d")
+    try:
+        stock = yf.Ticker(ticker)
+        return stock.history(period="6mo", interval="1d")
+    except:
+        return None
 
 
-# --- индикатор
+# --- INDICATOR ---
 def calculate_ttm_squeeze(df):
     close = df["Close"]
 
@@ -61,7 +57,7 @@ def calculate_ttm_squeeze(df):
     return squeeze_on.iloc[-1], momentum.iloc[-1]
 
 
-# --- новости (без зависаний)
+# --- NEWS ---
 def get_news(company):
     news_list = []
 
@@ -73,18 +69,18 @@ def get_news(company):
             parts = r.text.split('item__title')
             for p in parts[1:4]:
                 title = p.split('>')[1].split('<')[0]
-                news_list.append(f"RBC: {title}")
+                news_list.append(f"• {title}")
     except:
         pass
 
-    if not news_list:
-        return ["Нет новостей"]
-
-    return news_list
+    return news_list if news_list else ["• Нет новостей"]
 
 
-# --- бесплатный анализ (без AI)
+# --- ANALYSIS ---
 def ai_analysis(company, price, change, squeeze, momentum, news):
+
+    if price == "нет данных":
+        return f"📊 {company}\n\n❌ Нет данных"
 
     if squeeze and momentum > 0:
         action = "🔥 BUY"
@@ -105,8 +101,8 @@ def ai_analysis(company, price, change, squeeze, momentum, news):
 💰 Цена: {price} ({change}%)
 
 💡 Действие: {action}
-🎯 Срок: 1-3 месяца
-🧠 Причина: momentum={round(momentum,2)}
+🎯 Срок: 1–3 месяца
+🧠 Причина: momentum={round(momentum, 2)}
 
 📰 Новости:
 {news_text}
@@ -115,61 +111,66 @@ def ai_analysis(company, price, change, squeeze, momentum, news):
 """
 
 
-# --- отправка
+# --- SEND ---
 async def send_analysis():
     global USER_CHAT_ID
 
     print("CHAT_ID:", USER_CHAT_ID)
 
     if not USER_CHAT_ID:
+        print("❌ No chat_id")
         return
 
     for company, ticker in COMPANIES.items():
 
-        if ticker:
-            df = get_stock_data(ticker)
-        else:
-            df = None
+        try:
+            if ticker:
+                df = get_stock_data(ticker)
+            else:
+                df = None
 
-        if df is None or df.empty:
-            price = "нет данных"
-            change = 0
-            squeeze = False
-            momentum = 0
-        else:
-            price = round(df["Close"].iloc[-1], 2)
-            prev = df["Close"].iloc[-2]
-            change = round(((price - prev) / prev) * 100, 2)
+            if df is None or df.empty or len(df) < 2:
+                price = "нет данных"
+                change = 0
+                squeeze = False
+                momentum = 0
+            else:
+                price = round(df["Close"].iloc[-1], 2)
+                prev = df["Close"].iloc[-2]
+                change = round(((price - prev) / prev) * 100, 2)
 
-            squeeze, momentum = calculate_ttm_squeeze(df)
+                squeeze, momentum = calculate_ttm_squeeze(df)
 
-        news = get_news(company)
+            news = get_news(company)
 
-        analysis = ai_analysis(company, price, change, squeeze, momentum, news)
+            analysis = ai_analysis(company, price, change, squeeze, momentum, news)
 
-        await bot.send_message(USER_CHAT_ID, analysis)
+            await bot.send_message(USER_CHAT_ID, analysis)
+
+        except Exception as e:
+            print(f"ERROR with {company}: {e}")
 
 
-# --- старт
+# --- START COMMAND ---
 @dp.message(Command("start"))
 async def start(message: Message):
     global USER_CHAT_ID
     USER_CHAT_ID = message.chat.id
 
-    with open("chat_id.txt", "w") as f:
-        f.write(str(USER_CHAT_ID))
+    print("✅ CHAT_ID SAVED:", USER_CHAT_ID)
 
-    await message.answer("Бот запущен ✅ Аналитика будет будет в 14:00")
+    await message.answer("Бот запущен ✅ Аналитика будет в 14:00")
 
 
-# --- запуск
+# --- MAIN ---
 async def main():
     scheduler.add_job(send_analysis, "cron", hour=14, minute=0)
-    
-    # 🔥 тест сразу
-    await send_analysis()
 
     scheduler.start()
+
+    # 🔥 test on start
+    await send_analysis()
+
     await dp.start_polling(bot)
 
 
