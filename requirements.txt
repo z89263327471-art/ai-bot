@@ -1,0 +1,8 @@
+aiogram
+yfinance
+pandas
+numpy
+requests
+python-dotenv
+openai
+apscheduler
